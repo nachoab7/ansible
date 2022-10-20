@@ -1,0 +1,122 @@
+---
+- name: create users csv file
+  hosts: ubuntu
+  become: true
+  tasks:
+    - name: "Crear grupo administrador"
+      group:
+          name: "administrador"
+          state: present
+
+    - name: "Touch administrador file"
+      file:
+        path: "/etc/sudoers.d/administrador"
+        state: touch
+        mode: "0644"
+        owner: "root"
+        group: "root"
+
+    - name: "Permitir sudo sin que los usuarios del grupo administrador necesiten contraseña"
+      lineinfile:
+          dest: "/etc/sudoers.d/administrador"
+          state: present
+          line: "%administrador ALL=(ALL) NOPASSWD: ALL"
+
+    - name: Leer archivo csv
+      read_csv:
+        path: prueba1.csv
+      delegate_to: localhost
+      register: user_list
+
+    - name: Listar usuarios
+      debug:
+        msg: "{{ user_list.list }}"
+
+    - name: Extraer la informacion del CSV
+      debug:
+        msg: "{{ item.Login }}"
+      loop: "{{ user_list.list }}"
+
+    - name: Coger todos los usuarios
+      getent:
+        database: passwd
+    - name: Establecer usuarios como actuales
+      set_fact:
+        present_users: "{{ ansible_facts.getent_passwd.keys()|list }}"
+
+    - name: Crear usuarios desde el csv | cambio de contraseña en primer inicio | cambio de contraseña a los 3 meses
+      user:
+        name: "{{ item.Login }}"
+        state: present
+        group: "administrador"
+        password: "{{ item.contrasena | password_hash('sha512') }}"
+        expires: "-1"
+        shell: "/bin/bash"
+        home: "/home/{{ item.Login }}"
+        update_password: on_create
+        password_expire_max: 90
+      loop: "{{ user_list.list }}"
+      when: (item.rol == 'admin')
+
+    - name: Coger todos los usuarios
+      getent:
+        database: passwd
+
+    - name: Establecer nuevos usuarios
+      set_fact:
+        new_users: "{{ ansible_facts.getent_passwd.keys()|
+                       difference(present_users) }}"
+    - debug:
+        var: new_users
+
+#    - name: Cambio de contraseña en el inicio de sesion
+#      raw: "chage --lastday 0 {{ item.Login }}"
+#      loop: "{{ user_list.list }}"
+#      when: item.rol == 'admin'
+
+#    - name: Expirar la contraseña a los 3 meses
+#      raw: "chage -M 90 {{ item.Login }}"
+#      loop: "{{ user_list.list }}"
+#      when: item.rol == 'admin'
+
+    - name: correo contraseña mail module
+      delegate_to: localhost
+      run_once: true
+      mail:
+        host: "smtp.gmail.com"
+        port: 465
+        username: "backupviewnext@gmail.com"
+        password: "qfwqyqrsigaxnvyr"
+        to: "{{ item.email }}"
+        subject: "Credenciales de accesos"
+        subtype: html
+        body: "Su usuario para acceder al servidor es:<h2> {{ item.Login }}</h2> \n Su contraseña de inicio de sesion es:<h2> {{ item.contrasena }}</h2> \n Cambie la contraseña en >
+        secure: starttls
+      ignore_errors: true
+      when: item.Login is in new_users
+      loop: "{{ user_list.list }}"
+
+
+    - name: Borrar administradores unicamente del campo borra usuarios (admin)
+      user:
+        name: "{{ item.Login }}"
+        state: "absent"
+        remove: true
+        group: "administrador"
+      loop: "{{ user_list.list }}"
+      when: (item.Borrar == 'si') and (item.rol == 'admin')
+
+    - name: Correo baja de usuario
+      delegate_to: localhost
+      run_once: true
+      mail:
+        host: "smtp.gmail.com"
+        port: 465
+        username: "backupviewnext@gmail.com"
+        password: "qfwqyqrsigaxnvyr"
+        to: "ignacioab07@gmail.com"
+        subject: "Baja de usuario en los servidores"
+        subtype: html
+        body: "Se han dado de baja los usuarios indicados en los servidores"
+        secure: starttls
+      ignore_errors: true

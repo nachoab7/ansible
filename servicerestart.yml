@@ -1,0 +1,10 @@
+---
+- name: reiniciar servicios
+  hosts: ubuntu
+  tasks:
+    - name: Reinicio apache2
+      ansible.builtin.service:
+        name: apache2
+        state: restarted
+        enabled: true
+      ignore_errors: true
